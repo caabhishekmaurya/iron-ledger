@@ -635,6 +635,8 @@ function manualSave(){ persist(); persistDraft(); toast('All data saved ✓'); }
 function safeExit(){ persist(); persistDraft(); $('#exitOverlay').classList.add('show'); setTimeout(()=>{try{window.close();}catch(e){}},400); }
 $('#saveBtn').onclick=manualSave;
 $('#exitBtn').onclick=safeExit;
+$('#pdfBtn').onclick=generatePDF;
+$('#waBtn').onclick=shareWhatsApp;
 $('#scClose').onclick=()=>$('#scModal').classList.remove('show');
 $('#shareCopy').onclick=copyShare;
 $('#shareOpen').onclick=openWhatsAppDirect;
