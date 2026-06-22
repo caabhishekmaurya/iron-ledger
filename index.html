@@ -261,6 +261,21 @@
   <button class="btn btn-ghost btn-sm" id="shareClose" style="margin-top:9px;">Close</button>
 </div></div>
 
+<div class="modal" id="editModal"><div class="modal-card" style="max-width:440px;max-height:90vh;overflow-y:auto;">
+  <h3>✎ Edit Session</h3>
+  <p style="color:var(--faint);font-size:11.5px;margin-bottom:14px;">Fix a typo, add a forgotten set, or adjust an exercise. Changes recompute your PR badges &amp; progress charts — so keep it honest.</p>
+  <label class="fld">Day Type</label>
+  <select id="editDay" style="margin-bottom:12px;"></select>
+  <label class="fld">Date</label>
+  <input type="date" id="editDate" style="margin-bottom:12px;">
+  <div id="editExContainer"></div>
+  <button class="btn btn-ghost btn-sm" id="editAddEx" style="margin-top:10px;">+ Add Exercise</button>
+  <div class="footer-actions" style="margin-top:16px;gap:9px;">
+    <button class="btn btn-ghost btn-sm" id="editCancel" style="flex:1;">Cancel</button>
+    <button class="btn btn-primary btn-sm" id="editSave" style="flex:1.4;">Save Changes</button>
+  </div>
+</div></div>
+
 <div id="printArea"></div>
 
 <div class="toast" id="toast"></div>
@@ -474,13 +489,100 @@ function renderHistory(){
         <div class="l"><span class="tag">${s.dayType}</span><span class="sessdate">${prettyDate(s.date)}</span></div>
         <div style="display:flex;align-items:center;gap:10px;">
           <span class="sessmeta">${s.exercises.length} ex · ${totalSets} sets<br>${vol} kg</span>
+          <button class="mini-x edit-sess" title="edit">✎</button>
           <button class="mini-x del-sess" title="delete">🗑</button>
         </div></div>
       <div class="sessbody">${body}</div>`;
-    card.querySelector('.sesshead').onclick=ev=>{ if(ev.target.classList.contains('del-sess'))return; card.querySelector('.sessbody').classList.toggle('open'); };
+    card.querySelector('.sesshead').onclick=ev=>{ if(ev.target.classList.contains('del-sess')||ev.target.classList.contains('edit-sess'))return; card.querySelector('.sessbody').classList.toggle('open'); };
+    card.querySelector('.edit-sess').onclick=ev=>{ ev.stopPropagation(); openEditSession(s.id); };
     card.querySelector('.del-sess').onclick=()=>{ if(confirm('Delete this session?')){ sessions=sessions.filter(x=>x.id!==s.id); persist(); renderHistory(); renderTopStats(); toast('Deleted'); } };
     wrap.appendChild(card);
   });
+}
+
+/* ================= EDIT SESSION ================= */
+let editId=null;
+const DAY_TYPES=['Legs','Chest','Back','Shoulders','Arms','Full Body'];
+
+function openEditSession(id){
+  const s=sessions.find(x=>x.id===id); if(!s) return;
+  editId=id;
+  // populate day-type dropdown
+  const daySel=$('#editDay');
+  daySel.innerHTML=DAY_TYPES.map(d=>`<option value="${d}"${d===s.dayType?' selected':''}>${d}</option>`).join('');
+  $('#editDate').value=s.date;
+  const cont=$('#editExContainer'); cont.innerHTML='';
+  s.exercises.forEach(ex=>addEditExBlock(ex.name, ex.sets));
+  if(!s.exercises.length) addEditExBlock();
+  $('#editModal').classList.add('show');
+}
+
+function addEditExBlock(name='', sets=[{weight:'',reps:''}]){
+  const cont=$('#editExContainer');
+  const day=$('#editDay').value;
+  const lib=libFor(day), inLib=name && lib.includes(name);
+  const block=document.createElement('div'); block.className='exblock';
+  block.innerHTML=`
+    <div class="exhead">
+      <div class="selwrap">
+        <select class="exsel">${buildSelectOptions(day, inLib?name:'')}</select>
+      </div>
+      <button class="mini-x del-ex" title="remove">&times;</button>
+    </div>
+    <input class="exname-custom${(name&&!inLib)?' show':''}" placeholder="Type exercise name" value="${(name&&!inLib)?escapeHtml(name):''}">
+    <div class="setlabels"><span></span><span class="lbl">Weight kg</span><span class="lbl">Reps</span><span></span></div>
+    <div class="sets"></div>
+    <button class="btn btn-ghost btn-sm addset">+ Add Set</button>`;
+  cont.appendChild(block);
+  const sel=block.querySelector('.exsel'), custom=block.querySelector('.exname-custom');
+  if(name&&!inLib) sel.value='__custom__';
+  sel.onchange=()=>{ if(sel.value==='__custom__'){ custom.classList.add('show'); custom.focus(); } else { custom.classList.remove('show'); custom.value=''; } };
+  const setsWrap=block.querySelector('.sets');
+  (sets.length?sets:[{weight:'',reps:''}]).forEach(st=>addEditSetRow(setsWrap, st.weight, st.reps));
+  block.querySelector('.addset').onclick=()=>addEditSetRow(setsWrap);
+  block.querySelector('.del-ex').onclick=()=>block.remove();
+}
+
+function addEditSetRow(wrap,w='',r=''){
+  const row=document.createElement('div'); row.className='setrow';
+  row.innerHTML=`<div class="sn">${wrap.children.length+1}</div>
+    <input type="number" class="w" placeholder="kg" inputmode="decimal" value="${w}">
+    <input type="number" class="r" placeholder="reps" inputmode="numeric" value="${r}">
+    <button class="mini-x del-set">&times;</button>`;
+  wrap.appendChild(row);
+  row.querySelector('.del-set').onclick=()=>{ row.remove(); [...wrap.children].forEach((x,i)=>x.querySelector('.sn').textContent=i+1); };
+}
+
+function editBlockName(b){
+  const sel=b.querySelector('.exsel');
+  if(sel.value==='__custom__') return b.querySelector('.exname-custom').value.trim();
+  return sel.value.trim();
+}
+
+function saveEditSession(){
+  const s=sessions.find(x=>x.id===editId); if(!s){ $('#editModal').classList.remove('show'); return; }
+  const exercises=[];
+  $$('#editExContainer .exblock').forEach(b=>{
+    const nm=editBlockName(b); if(!nm) return;
+    const setEls=b.querySelectorAll('.setrow');
+    const sets=[];
+    setEls.forEach(row=>{
+      const w=parseFloat(row.querySelector('.w').value), r=parseInt(row.querySelector('.r').value,10);
+      if(!isNaN(w)&&!isNaN(r)&&w>=0&&r>0) sets.push({weight:w,reps:r});
+    });
+    if(sets.length) exercises.push({name:nm,sets});
+  });
+  if(!exercises.length){ toast('Keep at least one exercise with a complete set',true); return; }
+  s.dayType=$('#editDay').value;
+  s.date=$('#editDate').value||s.date;
+  s.exercises=exercises;
+  persist();
+  $('#editModal').classList.remove('show');
+  renderHistory(); renderTopStats();
+  // refresh progress/insights if those tabs are mounted
+  if(typeof renderProgressSelect==='function') renderProgressSelect();
+  if(typeof renderProgressBody==='function') renderProgressBody();
+  toast('Session updated ✓');
 }
 
 /* ================= PROGRESS ================= */
@@ -641,6 +743,17 @@ $('#scClose').onclick=()=>$('#scModal').classList.remove('show');
 $('#shareCopy').onclick=copyShare;
 $('#shareOpen').onclick=openWhatsAppDirect;
 $('#shareClose').onclick=()=>$('#shareModal').classList.remove('show');
+$('#editCancel').onclick=()=>$('#editModal').classList.remove('show');
+$('#editSave').onclick=saveEditSession;
+$('#editAddEx').onclick=()=>addEditExBlock();
+$('#editDay').onchange=()=>{
+  // refresh each exercise dropdown's library for the new day, preserving custom entries
+  $$('#editExContainer .exblock').forEach(b=>{
+    const sel=b.querySelector('.exsel'); if(sel.value==='__custom__') return;
+    const cur=sel.value, day=$('#editDay').value;
+    sel.innerHTML=buildSelectOptions(day, libFor(day).includes(cur)?cur:'');
+  });
+};
 
 /* ================= tabs ================= */
 $$('nav.tabs button').forEach(b=>b.onclick=()=>{
