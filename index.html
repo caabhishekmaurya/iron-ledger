@@ -176,6 +176,7 @@
   <section id="tab-log">
     <div class="panel">
       <h2><span class="dot"></span>New Session</h2>
+      <button class="btn btn-ghost btn-sm" id="repeatBtn" style="width:100%;margin-bottom:14px;">🔁 Repeat a previous session</button>
       <label class="fld">Date</label>
       <input type="date" id="sessDate" style="margin-bottom:13px;">
       <label class="fld">Day Type</label>
@@ -276,6 +277,13 @@
   </div>
 </div></div>
 
+<div class="modal" id="repeatModal"><div class="modal-card" style="max-width:420px;max-height:85vh;overflow-y:auto;">
+  <h3>🔁 Repeat a Previous Session</h3>
+  <p style="color:var(--faint);font-size:11.5px;margin-bottom:14px;">Loads a past session's exercises and sets into the form. Adjust the numbers you hit today, then Save as a new session. Last week's numbers are today's starting line.</p>
+  <div id="repeatList"></div>
+  <button class="btn btn-ghost btn-sm" id="repeatCancel" style="margin-top:14px;width:100%;">Cancel</button>
+</div></div>
+
 <div id="printArea"></div>
 
 <div class="toast" id="toast"></div>
@@ -313,6 +321,27 @@ const LIB={
     'Leg Press','Seated Cable Row','Dumbbell Bicep Curl','Tricep Pushdown','Standing Calf Raise']
 };
 function libFor(day){ return LIB[day] || [].concat(...Object.values(LIB)).filter((v,i,a)=>a.indexOf(v)===i); }
+
+/* ===== persistent custom exercise master (per day-type) ===== */
+const CUSTOM_KEY='ironledger_v2_custom';
+let customLib={};
+try{ customLib=JSON.parse(localStorage.getItem(CUSTOM_KEY))||{}; }catch(e){ customLib={}; }
+function saveCustomLib(){ try{ localStorage.setItem(CUSTOM_KEY, JSON.stringify(customLib)); }catch(e){} }
+function customFor(day){ return customLib[day] || []; }
+// merged, de-duplicated (case-insensitive) built-in + custom list for a day
+function mergedLibFor(day){
+  const base=libFor(day), extra=customFor(day), seen=new Set(base.map(n=>n.toLowerCase())), out=[...base];
+  extra.forEach(n=>{ const k=n.trim().toLowerCase(); if(k && !seen.has(k)){ seen.add(k); out.push(n.trim()); } });
+  return out;
+}
+// register a manually-typed exercise into the master for its day-type
+function registerCustomExercise(day, name){
+  name=(name||'').trim(); if(!name) return;
+  const inBuiltIn=libFor(day).some(n=>n.toLowerCase()===name.toLowerCase());
+  if(inBuiltIn) return;
+  if(!customLib[day]) customLib[day]=[];
+  if(!customLib[day].some(n=>n.toLowerCase()===name.toLowerCase())){ customLib[day].push(name); saveCustomLib(); }
+}
 
 /* ================= helpers ================= */
 const $=s=>document.querySelector(s), $$=s=>document.querySelectorAll(s);
@@ -353,7 +382,7 @@ function renderTopStats(){
 
 /* ================= LOG builder ================= */
 function buildSelectOptions(day,current){
-  const list=libFor(day);
+  const list=mergedLibFor(day);
   let html='<option value="">— select exercise —</option>';
   list.forEach(n=>{ html+=`<option value="${escapeHtml(n)}"${current===n?' selected':''}>${escapeHtml(n)}</option>`; });
   html+='<option value="__custom__">➕ Add custom exercise…</option>';
@@ -459,6 +488,7 @@ function saveSession(){
   const prs=[];
   exercises.forEach(ex=>{ const prior=exerciseSeries(ex.name); const pb=Math.max(0,...prior.map(p=>p.e1rm)); if(prior.length&&bestE1RM(ex)>pb) prs.push(ex.name); });
   sessions.push({id:Date.now(),date:$('#sessDate').value||todayISO(),dayType:draftDay,exercises});
+  exercises.forEach(ex=>registerCustomExercise(draftDay, ex.name));
   persist();
   // reset
   draftDay=null; $$('#dayPills button').forEach(b=>b.classList.remove('sel'));
@@ -503,30 +533,23 @@ function renderHistory(){
 /* ================= EDIT SESSION ================= */
 let editId=null;
 const DAY_TYPES=['Legs','Chest','Back','Shoulders','Arms','Full Body'];
-
 function openEditSession(id){
   const s=sessions.find(x=>x.id===id); if(!s) return;
   editId=id;
-  // populate day-type dropdown
-  const daySel=$('#editDay');
-  daySel.innerHTML=DAY_TYPES.map(d=>`<option value="${d}"${d===s.dayType?' selected':''}>${d}</option>`).join('');
+  $('#editDay').innerHTML=DAY_TYPES.map(d=>`<option value="${d}"${d===s.dayType?' selected':''}>${d}</option>`).join('');
   $('#editDate').value=s.date;
   const cont=$('#editExContainer'); cont.innerHTML='';
   s.exercises.forEach(ex=>addEditExBlock(ex.name, ex.sets));
   if(!s.exercises.length) addEditExBlock();
   $('#editModal').classList.add('show');
 }
-
 function addEditExBlock(name='', sets=[{weight:'',reps:''}]){
-  const cont=$('#editExContainer');
-  const day=$('#editDay').value;
-  const lib=libFor(day), inLib=name && lib.includes(name);
+  const cont=$('#editExContainer'), day=$('#editDay').value;
+  const inLib=name && mergedLibFor(day).includes(name);
   const block=document.createElement('div'); block.className='exblock';
   block.innerHTML=`
     <div class="exhead">
-      <div class="selwrap">
-        <select class="exsel">${buildSelectOptions(day, inLib?name:'')}</select>
-      </div>
+      <div class="selwrap"><select class="exsel">${buildSelectOptions(day, inLib?name:'')}</select></div>
       <button class="mini-x del-ex" title="remove">&times;</button>
     </div>
     <input class="exname-custom${(name&&!inLib)?' show':''}" placeholder="Type exercise name" value="${(name&&!inLib)?escapeHtml(name):''}">
@@ -542,7 +565,6 @@ function addEditExBlock(name='', sets=[{weight:'',reps:''}]){
   block.querySelector('.addset').onclick=()=>addEditSetRow(setsWrap);
   block.querySelector('.del-ex').onclick=()=>block.remove();
 }
-
 function addEditSetRow(wrap,w='',r=''){
   const row=document.createElement('div'); row.className='setrow';
   row.innerHTML=`<div class="sn">${wrap.children.length+1}</div>
@@ -552,21 +574,18 @@ function addEditSetRow(wrap,w='',r=''){
   wrap.appendChild(row);
   row.querySelector('.del-set').onclick=()=>{ row.remove(); [...wrap.children].forEach((x,i)=>x.querySelector('.sn').textContent=i+1); };
 }
-
 function editBlockName(b){
   const sel=b.querySelector('.exsel');
   if(sel.value==='__custom__') return b.querySelector('.exname-custom').value.trim();
   return sel.value.trim();
 }
-
 function saveEditSession(){
   const s=sessions.find(x=>x.id===editId); if(!s){ $('#editModal').classList.remove('show'); return; }
   const exercises=[];
   $$('#editExContainer .exblock').forEach(b=>{
     const nm=editBlockName(b); if(!nm) return;
-    const setEls=b.querySelectorAll('.setrow');
     const sets=[];
-    setEls.forEach(row=>{
+    b.querySelectorAll('.setrow').forEach(row=>{
       const w=parseFloat(row.querySelector('.w').value), r=parseInt(row.querySelector('.r').value,10);
       if(!isNaN(w)&&!isNaN(r)&&w>=0&&r>0) sets.push({weight:w,reps:r});
     });
@@ -576,13 +595,69 @@ function saveEditSession(){
   s.dayType=$('#editDay').value;
   s.date=$('#editDate').value||s.date;
   s.exercises=exercises;
+  exercises.forEach(ex=>registerCustomExercise(s.dayType, ex.name));
   persist();
   $('#editModal').classList.remove('show');
   renderHistory(); renderTopStats();
-  // refresh progress/insights if those tabs are mounted
   if(typeof renderProgressSelect==='function') renderProgressSelect();
-  if(typeof renderProgressBody==='function') renderProgressBody();
   toast('Session updated ✓');
+}
+
+/* ================= REPEAT PREVIOUS SESSION ================= */
+function openRepeatModal(){
+  if(!sessions.length){ toast('No past sessions to repeat yet',true); return; }
+  const list=$('#repeatList');
+  // smart order: same day-type as current draft first (most recent), then everything else recent
+  const sorted=[...sessions].sort((a,b)=>b.date.localeCompare(a.date)||b.id-a.id);
+  const sameDay = draftDay ? sorted.filter(s=>s.dayType===draftDay) : [];
+  const others = sorted.filter(s=>!sameDay.includes(s));
+  const ordered=[...sameDay,...others];
+  let html='';
+  if(draftDay && sameDay.length){
+    html+=`<div style="font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--accent);margin:2px 0 6px;">Your recent ${escapeHtml(draftDay)} sessions</div>`;
+  }
+  let dividerShown=false;
+  ordered.forEach(s=>{
+    if(draftDay && sameDay.length && !sameDay.includes(s) && !dividerShown){
+      html+=`<div style="font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);margin:12px 0 6px;">Other sessions</div>`;
+      dividerShown=true;
+    }
+    const vol=Math.round(sessionVolume(s)), totalSets=s.exercises.reduce((a,e)=>a+e.sets.length,0);
+    const preview=s.exercises.slice(0,3).map(e=>escapeHtml(e.name)).join(', ')+(s.exercises.length>3?'…':'');
+    html+=`<button class="repeat-item" data-id="${s.id}" style="width:100%;text-align:left;background:var(--card-2,#16181d);border:1px solid var(--line-soft);border-radius:12px;padding:12px;margin-bottom:8px;cursor:pointer;color:inherit;">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+        <span class="tag">${s.dayType}</span>
+        <span style="font-size:11px;color:var(--faint);">${prettyDate(s.date)} · ${s.exercises.length} ex · ${totalSets} sets · ${vol}kg</span>
+      </div>
+      <div style="font-size:11.5px;color:var(--faint);margin-top:6px;">${preview}</div>
+    </button>`;
+  });
+  list.innerHTML=html;
+  list.querySelectorAll('.repeat-item').forEach(btn=>{
+    btn.onclick=()=>repeatSession(parseInt(btn.dataset.id,10));
+  });
+  $('#repeatModal').classList.add('show');
+}
+function repeatSession(id){
+  const s=sessions.find(x=>x.id===id); if(!s) return;
+  // set day type
+  draftDay=s.dayType;
+  $$('#dayPills button').forEach(b=>{ b.classList.toggle('sel', b.dataset.day===s.dayType); });
+  // date = today (this is a NEW session, not an edit of the old)
+  $('#sessDate').value=todayISO();
+  // load exercises + sets into the draft form
+  $('#exContainer').innerHTML='';
+  s.exercises.forEach(e=>{
+    addExerciseBlock(e.name, e.sets.map(st=>({weight:st.weight,reps:st.reps})));
+  });
+  if(!s.exercises.length) addExerciseBlock();
+  $('#repeatModal').classList.remove('show');
+  // jump to Log tab if not already there
+  const logBtn=[...$$('nav.tabs button, #tabs button, .tabs button')].find(b=>/log/i.test(b.dataset.tab||b.textContent));
+  if(logBtn) logBtn.click();
+  touch();
+  toast('Loaded — adjust today\'s numbers & Save ✓');
+  window.scrollTo({top:0,behavior:'smooth'});
 }
 
 /* ================= PROGRESS ================= */
@@ -743,17 +818,6 @@ $('#scClose').onclick=()=>$('#scModal').classList.remove('show');
 $('#shareCopy').onclick=copyShare;
 $('#shareOpen').onclick=openWhatsAppDirect;
 $('#shareClose').onclick=()=>$('#shareModal').classList.remove('show');
-$('#editCancel').onclick=()=>$('#editModal').classList.remove('show');
-$('#editSave').onclick=saveEditSession;
-$('#editAddEx').onclick=()=>addEditExBlock();
-$('#editDay').onchange=()=>{
-  // refresh each exercise dropdown's library for the new day, preserving custom entries
-  $$('#editExContainer .exblock').forEach(b=>{
-    const sel=b.querySelector('.exsel'); if(sel.value==='__custom__') return;
-    const cur=sel.value, day=$('#editDay').value;
-    sel.innerHTML=buildSelectOptions(day, libFor(day).includes(cur)?cur:'');
-  });
-};
 
 /* ================= tabs ================= */
 $$('nav.tabs button').forEach(b=>b.onclick=()=>{
@@ -768,6 +832,18 @@ $$('nav.tabs button').forEach(b=>b.onclick=()=>{
 /* ================= wiring ================= */
 $('#addExBtn').onclick=()=>{ addExerciseBlock(); touch(); };
 $('#saveSessBtn').onclick=saveSession;
+$('#repeatBtn').onclick=openRepeatModal;
+$('#repeatCancel').onclick=()=>$('#repeatModal').classList.remove('show');
+$('#editCancel').onclick=()=>$('#editModal').classList.remove('show');
+$('#editSave').onclick=saveEditSession;
+$('#editAddEx').onclick=()=>addEditExBlock();
+$('#editDay').onchange=()=>{
+  $$('#editExContainer .exblock').forEach(b=>{
+    const sel=b.querySelector('.exsel'); if(sel.value==='__custom__') return;
+    const cur=sel.value, day=$('#editDay').value;
+    sel.innerHTML=buildSelectOptions(day, mergedLibFor(day).includes(cur)?cur:'');
+  });
+};
 $('#progressEx').onchange=renderProgressBody;
 $('#sessDate').onchange=touch;
 $$('#dayPills button').forEach(b=>b.onclick=()=>{ $$('#dayPills button').forEach(x=>x.classList.remove('sel')); b.classList.add('sel'); draftDay=b.dataset.day; refreshDropdownsForDay(); touch(); });
