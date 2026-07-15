@@ -66,10 +66,15 @@
   .exhead .selwrap{flex:1;}
   .exname-custom{margin-top:8px;display:none;}
   .exname-custom.show{display:block;}
-  .setrow{display:grid;grid-template-columns:26px 1fr 1fr 40px;gap:8px;align-items:center;margin-top:8px;}
+  .setrow{display:grid;grid-template-columns:22px 1fr 1fr 30px 30px 34px;gap:6px;align-items:center;margin-top:8px;}
   .setrow .sn{font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--faint);text-align:center;}
   .setrow .lbl{font-size:9px;letter-spacing:1px;color:var(--faint);text-transform:uppercase;text-align:center;}
-  .setlabels{display:grid;grid-template-columns:26px 1fr 1fr 40px;gap:8px;margin-top:4px;}
+  .flagbtn{background:transparent;border:1px solid var(--line-soft);border-radius:8px;height:38px;font-size:14px;cursor:pointer;color:var(--faint);opacity:.45;padding:0;line-height:1;}
+  .flagbtn.on{opacity:1;}
+  .flagbtn.grindy.on{border-color:#e8b13f;color:#e8b13f;background:rgba(232,177,63,.12);}
+  .flagbtn.bump.on{border-color:var(--accent);color:var(--accent);background:rgba(255,122,47,.12);}
+  .bump-hint .w{border-color:var(--accent)!important;box-shadow:0 0 0 1px var(--accent);}
+  .setlabels{display:grid;grid-template-columns:22px 1fr 1fr 30px 30px 34px;gap:6px;margin-top:4px;}
   .mini-x{background:transparent;border:none;color:var(--faint);font-size:24px;cursor:pointer;padding:0;line-height:1;height:48px;}
   .mini-x:active{color:var(--red);}
   .addset{margin-top:10px;}
@@ -400,7 +405,7 @@ function addExerciseBlock(name='', sets=[{weight:'',reps:''}]){
       <button class="mini-x del-ex" title="remove">&times;</button>
     </div>
     <input class="exname-custom${(name&&!inLib)?' show':''}" placeholder="Type exercise name" value="${(name&&!inLib)?escapeHtml(name):''}">
-    <div class="setlabels"><span></span><span class="lbl">Weight kg</span><span class="lbl">Reps</span><span></span></div>
+    <div class="setlabels"><span></span><span class="lbl">Weight kg</span><span class="lbl">Reps</span><span class="lbl" title="grindy">⚠</span><span class="lbl" title="bump next week">↑</span><span></span></div>
     <div class="sets"></div>
     <button class="btn btn-ghost btn-sm addset">+ Add Set</button>`;
   c.appendChild(block);
@@ -410,18 +415,22 @@ function addExerciseBlock(name='', sets=[{weight:'',reps:''}]){
   sel.onchange=()=>{ if(sel.value==='__custom__'){ custom.classList.add('show'); custom.focus(); } else { custom.classList.remove('show'); custom.value=''; } touch(); };
   custom.oninput=touch;
   const setsWrap=block.querySelector('.sets');
-  sets.forEach(st=>addSetRow(setsWrap, st.weight, st.reps));
+  sets.forEach(st=>addSetRow(setsWrap, st.weight, st.reps, !!st.grindy, !!st.bump));
   block.querySelector('.addset').onclick=()=>{ addSetRow(setsWrap); touch(); };
   block.querySelector('.del-ex').onclick=()=>{ block.remove(); touch(); };
 }
-function addSetRow(wrap,w='',r=''){
+function addSetRow(wrap,w='',r='',grindy=false,bump=false){
   const row=document.createElement('div'); row.className='setrow';
   row.innerHTML=`<div class="sn">${wrap.children.length+1}</div>
     <input type="number" class="w" placeholder="kg" inputmode="decimal" value="${w}">
     <input type="number" class="r" placeholder="reps" inputmode="numeric" value="${r}">
+    <button class="flagbtn grindy${grindy?' on':''}" title="Grindy / form broke down">⚠</button>
+    <button class="flagbtn bump${bump?' on':''}" title="Increase weight next week">↑</button>
     <button class="mini-x del-set">&times;</button>`;
   wrap.appendChild(row);
   row.querySelector('.w').oninput=touch; row.querySelector('.r').oninput=touch;
+  row.querySelector('.flagbtn.grindy').onclick=e=>{ e.preventDefault(); e.target.classList.toggle('on'); touch(); };
+  row.querySelector('.flagbtn.bump').onclick=e=>{ e.preventDefault(); e.target.classList.toggle('on'); touch(); };
   row.querySelector('.del-set').onclick=()=>{ row.remove(); [...wrap.children].forEach((x,i)=>x.querySelector('.sn').textContent=i+1); touch(); };
 }
 function refreshDropdownsForDay(){
@@ -448,7 +457,10 @@ function readDraft(){
       // A set is valid if reps are entered. Weight is optional (0 = bodyweight).
       if(rRaw!=='' && !isNaN(rep) && rep>0){
         const w=parseFloat(wRaw);
-        sets.push({weight:isNaN(w)?0:w, reps:rep});
+        const st={weight:isNaN(w)?0:w, reps:rep};
+        if(r.querySelector('.flagbtn.grindy').classList.contains('on')) st.grindy=true;
+        if(r.querySelector('.flagbtn.bump').classList.contains('on')) st.bump=true;
+        sets.push(st);
       } else if(wRaw!=='' || rRaw!==''){
         skipped++;
       }
@@ -464,7 +476,7 @@ function serializeDraft(){
     const sel=b.querySelector('.exsel');
     const custom = sel.value==='__custom__';
     const name = custom ? b.querySelector('.exname-custom').value : sel.value;
-    const sets=[]; b.querySelectorAll('.setrow').forEach(r=>sets.push({weight:r.querySelector('.w').value,reps:r.querySelector('.r').value}));
+    const sets=[]; b.querySelectorAll('.setrow').forEach(r=>sets.push({weight:r.querySelector('.w').value,reps:r.querySelector('.r').value,grindy:r.querySelector('.flagbtn.grindy').classList.contains('on')||undefined,bump:r.querySelector('.flagbtn.bump').classList.contains('on')||undefined}));
     ex.push({name,custom,sets});
   });
   return {day:draftDay,date:$('#sessDate').value,ex};
@@ -486,7 +498,13 @@ function saveSession(){
   const {exercises,skipped}=readDraft();
   if(!exercises.length){ toast('Add at least one exercise with a complete set',true); return; }
   const prs=[];
-  exercises.forEach(ex=>{ const prior=exerciseSeries(ex.name); const pb=Math.max(0,...prior.map(p=>p.e1rm)); if(prior.length&&bestE1RM(ex)>pb) prs.push(ex.name); });
+  exercises.forEach(ex=>{
+    const prior=exerciseSeries(ex.name); const pb=Math.max(0,...prior.map(p=>p.e1rm));
+    if(prior.length&&bestE1RM(ex)>pb){
+      let bE=0,g=false; ex.sets.forEach(st=>{ const v=epley(st.weight||0,st.reps||0); if(v>bE){ bE=v; g=!!st.grindy; } });
+      prs.push({name:ex.name,grindy:g});
+    }
+  });
   sessions.push({id:Date.now(),date:$('#sessDate').value||todayISO(),dayType:draftDay,exercises});
   exercises.forEach(ex=>registerCustomExercise(draftDay, ex.name));
   persist();
@@ -495,7 +513,7 @@ function saveSession(){
   $('#exContainer').innerHTML=''; addExerciseBlock();
   $('#sessDate').value=todayISO();
   persistDraft(); renderTopStats();
-  let msg = prs.length ? `Saved! New PR: ${prs[0]} 🏆` : `Session saved 💪`;
+  let msg = prs.length ? (prs[0].grindy ? `Saved! PR on ${prs[0].name} — but it was grindy ⚠ Validate it clean before adding load.` : `Saved! New PR: ${prs[0].name} 🏆`) : `Session saved 💪`;
   if(skipped) msg += ` (${skipped} incomplete skipped)`;
   toast(msg);
 }
@@ -511,8 +529,11 @@ function renderHistory(){
     s.exercises.forEach(e=>{
       const prior=exerciseSeriesBefore(e.name,s.date,s.id), pb=Math.max(0,...prior.map(p=>p.e1rm));
       const isPR=prior.length&&bestE1RM(e)>pb;
-      const setsTxt=e.sets.map(st=>`${st.weight}<span style="color:var(--faint)">×</span>${st.reps}`).join('  ·  ');
-      body+=`<div class="ex-line"><div class="ex-name">${escapeHtml(e.name)} ${isPR?'<span class="pr-badge">PR</span>':''}</div><div class="ex-sets">${setsTxt}</div></div>`;
+      // is the PR-driving set (highest e1RM) a grindy one? If so, qualify the badge.
+      let prGrindy=false;
+      if(isPR){ let bE=0; e.sets.forEach(st=>{ const v=epley(st.weight||0,st.reps||0); if(v>bE){ bE=v; prGrindy=!!st.grindy; } }); }
+      const setsTxt=e.sets.map(st=>`${st.weight}<span style="color:var(--faint)">×</span>${st.reps}${st.grindy?'<span style="color:#e8b13f;font-size:10px;"> ⚠</span>':''}${st.bump?'<span style="color:var(--accent);font-size:10px;"> ↑</span>':''}`).join('  ·  ');
+      body+=`<div class="ex-line"><div class="ex-name">${escapeHtml(e.name)} ${isPR?(prGrindy?'<span class="pr-badge" style="background:#e8b13f;" title="PR set was grindy — validate before building on it">PR ⚠</span>':'<span class="pr-badge">PR</span>'):''}</div><div class="ex-sets">${setsTxt}</div></div>`;
     });
     const card=document.createElement('div'); card.className='sess';
     card.innerHTML=`<div class="sesshead">
@@ -553,7 +574,7 @@ function addEditExBlock(name='', sets=[{weight:'',reps:''}]){
       <button class="mini-x del-ex" title="remove">&times;</button>
     </div>
     <input class="exname-custom${(name&&!inLib)?' show':''}" placeholder="Type exercise name" value="${(name&&!inLib)?escapeHtml(name):''}">
-    <div class="setlabels"><span></span><span class="lbl">Weight kg</span><span class="lbl">Reps</span><span></span></div>
+    <div class="setlabels"><span></span><span class="lbl">Weight kg</span><span class="lbl">Reps</span><span class="lbl" title="grindy">⚠</span><span class="lbl" title="bump next week">↑</span><span></span></div>
     <div class="sets"></div>
     <button class="btn btn-ghost btn-sm addset">+ Add Set</button>`;
   cont.appendChild(block);
@@ -561,17 +582,21 @@ function addEditExBlock(name='', sets=[{weight:'',reps:''}]){
   if(name&&!inLib) sel.value='__custom__';
   sel.onchange=()=>{ if(sel.value==='__custom__'){ custom.classList.add('show'); custom.focus(); } else { custom.classList.remove('show'); custom.value=''; } };
   const setsWrap=block.querySelector('.sets');
-  (sets.length?sets:[{weight:'',reps:''}]).forEach(st=>addEditSetRow(setsWrap, st.weight, st.reps));
+  (sets.length?sets:[{weight:'',reps:''}]).forEach(st=>addEditSetRow(setsWrap, st.weight, st.reps, !!st.grindy, !!st.bump));
   block.querySelector('.addset').onclick=()=>addEditSetRow(setsWrap);
   block.querySelector('.del-ex').onclick=()=>block.remove();
 }
-function addEditSetRow(wrap,w='',r=''){
+function addEditSetRow(wrap,w='',r='',grindy=false,bump=false){
   const row=document.createElement('div'); row.className='setrow';
   row.innerHTML=`<div class="sn">${wrap.children.length+1}</div>
     <input type="number" class="w" placeholder="kg" inputmode="decimal" value="${w}">
     <input type="number" class="r" placeholder="reps" inputmode="numeric" value="${r}">
+    <button class="flagbtn grindy${grindy?' on':''}" title="Grindy / form broke down">⚠</button>
+    <button class="flagbtn bump${bump?' on':''}" title="Increase weight next week">↑</button>
     <button class="mini-x del-set">&times;</button>`;
   wrap.appendChild(row);
+  row.querySelector('.flagbtn.grindy').onclick=e=>{ e.preventDefault(); e.target.classList.toggle('on'); };
+  row.querySelector('.flagbtn.bump').onclick=e=>{ e.preventDefault(); e.target.classList.toggle('on'); };
   row.querySelector('.del-set').onclick=()=>{ row.remove(); [...wrap.children].forEach((x,i)=>x.querySelector('.sn').textContent=i+1); };
 }
 function editBlockName(b){
@@ -587,7 +612,7 @@ function saveEditSession(){
     const sets=[];
     b.querySelectorAll('.setrow').forEach(row=>{
       const w=parseFloat(row.querySelector('.w').value), r=parseInt(row.querySelector('.r').value,10);
-      if(!isNaN(w)&&!isNaN(r)&&w>=0&&r>0) sets.push({weight:w,reps:r});
+      if(!isNaN(w)&&!isNaN(r)&&w>=0&&r>0){ const st={weight:w,reps:r}; if(row.querySelector(".flagbtn.grindy").classList.contains("on")) st.grindy=true; if(row.querySelector(".flagbtn.bump").classList.contains("on")) st.bump=true; sets.push(st); }
     });
     if(sets.length) exercises.push({name:nm,sets});
   });
@@ -645,10 +670,19 @@ function repeatSession(id){
   $$('#dayPills button').forEach(b=>{ b.classList.toggle('sel', b.dataset.day===s.dayType); });
   // date = today (this is a NEW session, not an edit of the old)
   $('#sessDate').value=todayISO();
-  // load exercises + sets into the draft form
+  // load exercises + sets into the draft form (flags do NOT carry over — fresh week, fresh call)
   $('#exContainer').innerHTML='';
+  let bumpCount=0;
   s.exercises.forEach(e=>{
     addExerciseBlock(e.name, e.sets.map(st=>({weight:st.weight,reps:st.reps})));
+  });
+  // highlight the weight inputs of sets that were flagged for increase
+  const blocks=$$('#exContainer .exblock');
+  s.exercises.forEach((e,bi)=>{
+    const rows=blocks[bi]?blocks[bi].querySelectorAll('.setrow'):[];
+    e.sets.forEach((st,si)=>{
+      if(st.bump && rows[si]){ rows[si].classList.add('bump-hint'); bumpCount++; }
+    });
   });
   if(!s.exercises.length) addExerciseBlock();
   $('#repeatModal').classList.remove('show');
@@ -656,7 +690,7 @@ function repeatSession(id){
   const logBtn=[...$$('nav.tabs button, #tabs button, .tabs button')].find(b=>/log/i.test(b.dataset.tab||b.textContent));
   if(logBtn) logBtn.click();
   touch();
-  toast('Loaded — adjust today\'s numbers & Save ✓');
+  toast(bumpCount?`Loaded — ${bumpCount} set${bumpCount>1?'s':''} flagged for increase (highlighted) ↑`:'Loaded — adjust today\'s numbers & Save ✓');
   window.scrollTo({top:0,behavior:'smooth'});
 }
 

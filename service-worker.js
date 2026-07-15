@@ -1,5 +1,5 @@
 // Iron Ledger service worker — offline caching
-const CACHE = 'ironledger-v3';
+const CACHE = 'ironledger-v4';
 const ASSETS = [
   './',
   './index.html',
